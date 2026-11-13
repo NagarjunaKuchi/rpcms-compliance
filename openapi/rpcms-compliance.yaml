@@ -1,0 +1,195 @@
+openapi: 3.0.3
+info:
+  title: RPCMS Compliance & Reporting Adapter (DRAFT)
+  version: 0.1.0
+  description: |
+    DRAFT contract for the RPCMS-side adapter around URSB, NGO Bureau, AMP (MoFPED) and NIMES.
+    Derived only from the RPCMS demo screens (partner verification against URSB and NGO Bureau,
+    AMP funding record lookup, quarterly expenditure to AMP, quarterly indicators to NIMES).
+    The upstream interfaces, access terms and data formats of ALL four systems are UNCONFIRMED.
+    Field names below are placeholders to be replaced by the real ones.
+servers:
+  - url: https://rpcms.example.org/api/v1
+security:
+  - bearerOfficer: []
+paths:
+  /partners/{partnerId}/compliance-checks:
+    post:
+      operationId: runComplianceCheck
+      summary: Verify a partner organisation against URSB, NGO Bureau and its AMP funding record
+      parameters:
+        - { name: partnerId, in: path, required: true, schema: { type: string }, example: PRT-2026-0187 }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ComplianceCheckRequest' }
+      responses:
+        '200':
+          description: Result per source. A source that cannot be reached is UNAVAILABLE, never silently VERIFIED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComplianceCheckResult' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /amp/records/{ampRecordId}:
+    get:
+      operationId: getAmpRecord
+      summary: Look up an AMP funding record
+      parameters:
+        - { name: ampRecordId, in: path, required: true, schema: { type: string }, example: AMP-UG-2026-00731 }
+      responses:
+        '200':
+          description: Funding record as held by AMP
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AmpRecord' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+  /amp/expenditure-reports:
+    post:
+      operationId: submitExpenditureReport
+      summary: Send quarterly expenditure to AMP, matched to funding records
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExpenditureReport' }
+      responses:
+        '202':
+          description: Accepted for submission (async; poll the report)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Submission' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /nimes/indicator-submissions:
+    post:
+      operationId: submitNimesIndicators
+      summary: Submit quarterly indicators to NIMES
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IndicatorSubmission' }
+      responses:
+        '202':
+          description: Accepted for submission
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Submission' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /submissions/{submissionId}:
+    get:
+      operationId: getSubmission
+      parameters:
+        - { name: submissionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Submission status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Submission' }
+        '404': { $ref: '#/components/responses/Problem' }
+components:
+  securitySchemes:
+    bearerOfficer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Problem:
+      description: Error
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    ComplianceCheckRequest:
+      type: object
+      required: [ursbRegistrationNo, ngoBureauPermitNo]
+      properties:
+        ursbRegistrationNo: { type: string }
+        ngoBureauPermitNo: { type: string }
+        ampRecordId: { type: string, example: AMP-UG-2026-00731 }
+    SourceResult:
+      type: object
+      required: [source, status, checkedAt]
+      properties:
+        source: { type: string, enum: [URSB, NGO_BUREAU, AMP] }
+        status:
+          type: string
+          enum: [VERIFIED, NOT_FOUND, EXPIRED, MISMATCH, UNAVAILABLE]
+        validUntil: { type: string, format: date, nullable: true }
+        sourceReference: { type: string, nullable: true, description: Reference returned by the source, if any }
+        checkedAt: { type: string, format: date-time }
+    ComplianceCheckResult:
+      type: object
+      properties:
+        partnerId: { type: string }
+        overall:
+          type: string
+          enum: [COMPLIANT, NON_COMPLIANT, INCOMPLETE]
+          description: COMPLIANT only if every requested source is VERIFIED; any UNAVAILABLE gives INCOMPLETE
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/SourceResult' }
+    AmpRecord:
+      type: object
+      properties:
+        ampRecordId: { type: string }
+        funder: { type: string }
+        committedAmount: { type: number }
+        currency: { type: string }
+        status: { type: string }
+    ExpenditureLine:
+      type: object
+      required: [ampRecordId, amount, currency]
+      properties:
+        ampRecordId: { type: string }
+        partnerId: { type: string }
+        amount: { type: number }
+        currency: { type: string }
+    ExpenditureReport:
+      type: object
+      required: [reportId, period, lines]
+      properties:
+        reportId: { type: string, description: Client-chosen id; resubmitting the same id with different content is a 409 }
+        period: { type: string, example: 2026-Q3 }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/ExpenditureLine' }
+    Indicator:
+      type: object
+      required: [code, value]
+      properties:
+        code: { type: string, description: NIMES indicator code (to be confirmed) }
+        value: { type: number }
+        unit: { type: string }
+    IndicatorSubmission:
+      type: object
+      required: [submissionRef, period, indicators]
+      properties:
+        submissionRef: { type: string }
+        period: { type: string, example: 2026-Q3 }
+        indicators:
+          type: array
+          items: { $ref: '#/components/schemas/Indicator' }
+    Submission:
+      type: object
+      properties:
+        submissionId: { type: string }
+        target: { type: string, enum: [AMP, NIMES] }
+        status: { type: string, enum: [QUEUED, SUBMITTED, ACCEPTED, REJECTED, FAILED] }
+        remoteReference: { type: string, nullable: true }
+        detail: { type: string, nullable: true }
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
