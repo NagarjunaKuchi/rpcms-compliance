@@ -30,8 +30,11 @@ def client(settings, sf, clients):
     return TestClient(create_app(settings, clients, sf))
 
 
-def auth():
-    return {"Authorization": "Bearer " + jwt.encode({"sub": "off-1", "exp": int(time.time()) + 300}, KEY, algorithm="HS256")}
+def auth(roles=None):
+    claims = {"sub": "off-1", "exp": int(time.time()) + 300}
+    if roles:
+        claims["roles"] = roles
+    return {"Authorization": "Bearer " + jwt.encode(claims, KEY, algorithm="HS256")}
 
 
 def idem(n=1):

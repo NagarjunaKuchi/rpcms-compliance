@@ -154,3 +154,16 @@ def process_due(session: Session, settings: Settings, clients: Clients, now: dat
         counts[key] = counts.get(key, 0) + 1
         session.commit()
     return counts
+
+
+def requeue(session: Session, submission_id: str, now: datetime | None = None) -> Submission:
+    """FAILED -> QUEUED with a fresh retry budget. REJECTED is a final upstream decision and is not requeueable."""
+    row = session.get(Submission, int(submission_id)) if submission_id.isdigit() else None
+    if row is None:
+        raise ApiError(404, "Submission not found")
+    if row.status != "FAILED":
+        raise ApiError(409, "Only FAILED submissions can be requeued", f"submission is {row.status}")
+    row.status, row.attempts, row.detail = "QUEUED", 0, None
+    row.next_attempt_at = now or datetime.now(timezone.utc)
+    session.commit()
+    return row

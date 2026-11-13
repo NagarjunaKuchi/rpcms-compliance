@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_audience: str | None = None
     database_url: str = "sqlite:///./rpcms_compliance.db"
+    # Role (string in the JWT 'roles' claim) allowed to requeue FAILED submissions.
+    admin_role: str = "compliance-admin"
 
     # Dotted paths to the clients. Defaults are development mocks that talk to nothing.
     ursb_client_impl: str = "rpcms_compliance.upstream.MockRegistryClient"

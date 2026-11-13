@@ -59,7 +59,7 @@ def create_app(settings: Settings | None = None, clients: Clients | None = None,
         with Session_() as s:
             yield s
 
-    def officer(authorization: str | None = Header(default=None)) -> str:
+    def claims(authorization: str | None = Header(default=None)) -> dict:
         if not authorization or not authorization.lower().startswith("bearer "):
             raise ApiError(401, "Missing bearer token")
         try:
@@ -68,6 +68,15 @@ def create_app(settings: Settings | None = None, clients: Clients | None = None,
                            options={"require": ["sub", "exp"], "verify_aud": settings.jwt_audience is not None})
         except jwt.PyJWTError:
             raise ApiError(401, "Invalid token")
+        return c
+
+    def officer(c: dict = Depends(claims)) -> str:
+        return c["sub"]
+
+    def admin(c: dict = Depends(claims)) -> str:
+        roles = c.get("roles") or []
+        if settings.admin_role not in (roles if isinstance(roles, list) else [roles]):
+            raise ApiError(403, "Admin role required")
         return c["sub"]
 
     def idem(idempotency_key: str | None = Header(default=None)) -> str:
@@ -124,5 +133,9 @@ def create_app(settings: Settings | None = None, clients: Clients | None = None,
         if row is None:
             raise ApiError(404, "Submission not found")
         return service.submission_view(row)
+
+    @app.post("/api/v1/submissions/{submission_id}/requeue")
+    def requeue(submission_id: str, _: str = Depends(admin), s: Session = Depends(db)):
+        return service.submission_view(service.requeue(s, submission_id))
 
     return app

@@ -15,6 +15,7 @@ access terms and data formats are unconfirmed, so nothing here talks to URSB, th
 | `POST /api/v1/amp/expenditure-reports` | Queue a quarterly expenditure report (202 new, 200 identical resend, 409 same `reportId` with different content) |
 | `POST /api/v1/nimes/indicator-submissions` | Queue quarterly indicators (same rules, keyed on `submissionRef`) |
 | `GET /api/v1/submissions/{id}` | Status: `QUEUED`, `ACCEPTED`, `REJECTED`, `FAILED` |
+| `POST /api/v1/submissions/{id}/requeue` | `FAILED` -> `QUEUED` with a fresh retry budget. Needs the role in `RPCMS_COMPLIANCE_ADMIN_ROLE` (default `compliance-admin`) in the JWT `roles` claim (403 otherwise); `REJECTED` and other states return 409 |
 
 Rules worth knowing:
 - `overall` is `COMPLIANT` only if every requested source is `VERIFIED`. A definite failure (`NOT_FOUND`, `EXPIRED`, `MISMATCH`) gives `NON_COMPLIANT` even if another source is down; an outage alone gives `INCOMPLETE`. An unreachable source is never treated as verified.
@@ -39,5 +40,5 @@ Mock rules (see `upstream.py`): number/ID suffix `-DOWN` unavailable, `-NOTFOUND
 - Period is validated only as `YYYY-Qn`; NIMES indicator codes and units are not validated against any list.
 - Any valid officer token can run checks and submissions: no roles or partner scoping yet.
 - Compliance results are stored as returned, with no freshness policy (how recent a check must be to count).
-- Tables are created at startup with no migrations; use Alembic and PostgreSQL before production. Not load-tested; no requeue endpoint for `FAILED` submissions.
+- Tables are created at startup with no migrations; use Alembic and PostgreSQL before production. Not load-tested; requeue is per submission only, submissions are not scoped by partner (any officer can read one), and the `roles` claim name/format is an assumption about the token issuer.
 - The 200 response for an identical resend and the 400 for a missing `Idempotency-Key` are additions to the drafted contract.

@@ -148,3 +148,26 @@ def test_load_clients_rejects_bad_impl():
     assert isinstance(MockAmpClient(), type(load_clients(Settings(jwt_key=KEY)).amp))
     assert isinstance(MockNimesClient(), type(load_clients(Settings(jwt_key=KEY)).nimes))
     assert isinstance(MockRegistryClient(), RegistryClient)
+
+
+def test_requeue_needs_admin_role_and_only_works_on_failed(client, settings, sf, clients):
+    client.post("/api/v1/amp/expenditure-reports", json=report("R-REJ", "AMP-1-REJECT"), headers=idem(1))
+    client.post("/api/v1/nimes/indicator-submissions", json=indicators("N-DOWN", "IND-1-DOWN"), headers=idem(2))
+    now = datetime.now(timezone.utc) + timedelta(seconds=1)
+    for _ in range(settings.max_attempts):
+        with sf() as s:
+            process_due(s, settings, clients, now)
+        now += timedelta(hours=2)
+    assert client.get("/api/v1/submissions/2", headers=auth()).json()["status"] == "FAILED"
+    admin = {"roles": ["compliance-admin"]}
+    url = "/api/v1/submissions/2/requeue"
+    assert client.post(url).status_code == 401
+    assert client.post(url, headers=auth()).status_code == 403
+    assert client.post(url, headers=auth(["other"])).status_code == 403
+    assert client.post("/api/v1/submissions/1/requeue", headers=auth(admin["roles"])).status_code == 409  # REJECTED is final
+    assert client.post("/api/v1/submissions/99/requeue", headers=auth(admin["roles"])).status_code == 404
+    r = client.post(url, headers=auth(admin["roles"]))
+    assert r.status_code == 200 and r.json()["status"] == "QUEUED"
+    assert client.post(url, headers=auth(admin["roles"])).status_code == 409  # no longer FAILED
+    with sf() as s:  # still down upstream: it retries with a fresh budget rather than failing at once
+        assert process_due(s, settings, clients, now + timedelta(hours=5)) == {"retry": 1}

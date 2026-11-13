@@ -95,6 +95,21 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Submission' }
         '404': { $ref: '#/components/responses/Problem' }
+  /submissions/{submissionId}/requeue:
+    post:
+      operationId: requeueSubmission
+      summary: Requeue a FAILED submission (admin role required)
+      parameters:
+        - { name: submissionId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Submission back in QUEUED with a fresh retry budget
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Submission' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     bearerOfficer:
