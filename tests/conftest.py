@@ -31,8 +31,10 @@ def client(settings, sf, clients):
     return TestClient(create_app(settings, clients, sf))
 
 
-def auth(roles=None):
+def auth(roles=None, partner="PRT-2026-0187"):
     claims = {"sub": "off-1", "exp": int(time.time()) + 300}
+    if partner:
+        claims["partner_id"] = partner
     if roles:
         claims["roles"] = roles
     return {"Authorization": "Bearer " + jwt.encode(claims, KEY, algorithm="HS256")}

@@ -74,11 +74,21 @@ def create_app(settings: Settings | None = None, clients: Clients | None = None,
     def officer(c: dict = Depends(claims)) -> str:
         return c["sub"]
 
-    def admin(c: dict = Depends(claims)) -> str:
+    def is_admin(c: dict) -> bool:
         roles = c.get("roles") or []
-        if settings.admin_role not in (roles if isinstance(roles, list) else [roles]):
+        return settings.admin_role in (roles if isinstance(roles, list) else [roles])
+
+    def admin(c: dict = Depends(claims)) -> str:
+        if not is_admin(c):
             raise ApiError(403, "Admin role required")
         return c["sub"]
+
+    def own_partner(c: dict = Depends(claims)) -> str:
+        """The partner this caller acts for: its partner_id claim. Admins may omit it."""
+        pid = c.get("partner_id")
+        if not pid and not is_admin(c):
+            raise ApiError(403, "Token has no partner_id")
+        return pid or ""
 
     def idem(idempotency_key: str | None = Header(default=None)) -> str:
         if not idempotency_key or not (8 <= len(idempotency_key) <= 128):
@@ -98,8 +108,10 @@ def create_app(settings: Settings | None = None, clients: Clients | None = None,
         return {"status": "ok"}
 
     @app.post("/api/v1/partners/{partner_id}/compliance-checks")
-    def check(partner_id: str, body: ComplianceCheckRequest, _: str = Depends(officer), key: str = Depends(idem),
+    def check(partner_id: str, body: ComplianceCheckRequest, c: dict = Depends(claims), key: str = Depends(idem),
               s: Session = Depends(db)):
+        if not is_admin(c) and c.get("partner_id") != partner_id:
+            raise ApiError(403, "Not allowed to check this partner")
         return service.run_check(s, clients, partner_id, key, body)
 
     @app.get("/api/v1/amp/records/{amp_record_id}")
@@ -113,25 +125,29 @@ def create_app(settings: Settings | None = None, clients: Clients | None = None,
         return {"ampRecordId": rec.amp_record_id, "funder": rec.funder, "committedAmount": rec.committed_amount,
                 "currency": rec.currency, "status": rec.status}
 
-    def _submit(target, ref, body, response, key, s):
-        row, created = service.enqueue(s, target, ref, key, body)
+    def _submit(target, ref, body, response, key, s, partner_id):
+        row, created = service.enqueue(s, target, ref, key, body, partner_id)
         response.status_code = 202 if created else 200
         return service.submission_view(row)
 
     @app.post("/api/v1/amp/expenditure-reports", status_code=202)
-    def expenditure(body: ExpenditureReport, response: Response, _: str = Depends(officer), key: str = Depends(idem),
+    def expenditure(body: ExpenditureReport, response: Response, c: dict = Depends(claims), key: str = Depends(idem),
                     s: Session = Depends(db)):
-        return _submit("AMP", body.reportId, body, response, key, s)
+        pid = own_partner(c)
+        if not is_admin(c) and any(ln.partnerId not in (None, pid) for ln in body.lines):
+            raise ApiError(403, "Report lines for another partner")
+        return _submit("AMP", body.reportId, body, response, key, s, pid)
 
     @app.post("/api/v1/nimes/indicator-submissions", status_code=202)
-    def indicators(body: IndicatorSubmission, response: Response, _: str = Depends(officer), key: str = Depends(idem),
-                   s: Session = Depends(db)):
-        return _submit("NIMES", body.submissionRef, body, response, key, s)
+    def indicators(body: IndicatorSubmission, response: Response, pid: str = Depends(own_partner),
+                   key: str = Depends(idem), s: Session = Depends(db)):
+        return _submit("NIMES", body.submissionRef, body, response, key, s, pid)
 
     @app.get("/api/v1/submissions/{submission_id}")
-    def get_submission(submission_id: str, _: str = Depends(officer), s: Session = Depends(db)):
+    def get_submission(submission_id: str, c: dict = Depends(claims), s: Session = Depends(db)):
         row = s.get(Submission, int(submission_id)) if submission_id.isdigit() else None
-        if row is None:
+        # Someone else's submission looks the same as a missing one.
+        if row is None or (not is_admin(c) and (row.partner_id is None or row.partner_id != c.get("partner_id"))):
             raise ApiError(404, "Submission not found")
         return service.submission_view(row)
 

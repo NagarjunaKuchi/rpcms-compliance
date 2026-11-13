@@ -86,6 +86,7 @@ paths:
   /submissions/{submissionId}:
     get:
       operationId: getSubmission
+      description: Only the submitting partner or an admin; otherwise 404.
       parameters:
         - { name: submissionId, in: path, required: true, schema: { type: string } }
       responses:

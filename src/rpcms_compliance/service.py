@@ -103,14 +103,16 @@ def view(row: ComplianceCheck) -> dict:
     return {"partnerId": row.partner_id, "overall": row.overall, "results": row.results}
 
 
-def enqueue(session: Session, target: str, client_ref: str, key: str, model, now: datetime | None = None) -> tuple[Submission, bool]:
+def enqueue(session: Session, target: str, client_ref: str, key: str, model, partner_id: str,
+            now: datetime | None = None) -> tuple[Submission, bool]:
     fp = fingerprint(model)
     row = session.scalar(select(Submission).where(Submission.target == target, Submission.client_ref == client_ref))
     if row is not None:
-        if row.fingerprint != fp:
+        # Same id from another partner is refused without revealing whose it is or what it holds.
+        if row.fingerprint != fp or row.partner_id != partner_id:
             raise ApiError(409, "Submission id reused with different content")
         return row, False
-    row = Submission(target=target, client_ref=client_ref, idempotency_key=key, fingerprint=fp,
+    row = Submission(target=target, client_ref=client_ref, idempotency_key=key, fingerprint=fp, partner_id=partner_id,
                      payload=model.model_dump(mode="json"), next_attempt_at=now or datetime.now(timezone.utc))
     session.add(row)
     try:
@@ -118,7 +120,7 @@ def enqueue(session: Session, target: str, client_ref: str, key: str, model, now
     except IntegrityError:
         session.rollback()
         row = session.scalar(select(Submission).where(Submission.target == target, Submission.client_ref == client_ref))
-        if row is None or row.fingerprint != fp:
+        if row is None or row.fingerprint != fp or row.partner_id != partner_id:
             raise ApiError(409, "Submission id reused with different content")
         return row, False
     return row, True

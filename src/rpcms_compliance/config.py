@@ -13,7 +13,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./rpcms_compliance.db"
     # True (default, dev/tests): create tables at startup. Set False in production and run `alembic upgrade head`.
     create_tables: bool = True
-    # Role (string in the JWT 'roles' claim) allowed to requeue FAILED submissions.
+    # Role (string in the JWT 'roles' claim) that may act for any partner and requeue FAILED submissions.
+    # Other tokens must carry a partner_id claim and can only act for that partner. Claim names are an assumption.
     admin_role: str = "compliance-admin"
 
     # Dotted paths to the clients. Defaults are development mocks that talk to nothing.

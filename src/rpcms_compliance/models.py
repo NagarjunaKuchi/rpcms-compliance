@@ -33,6 +33,8 @@ class Submission(Base):
     target: Mapped[str] = mapped_column(String(8))  # AMP | NIMES
     client_ref: Mapped[str] = mapped_column(String(128))  # reportId / submissionRef
     idempotency_key: Mapped[str] = mapped_column(String(128))
+    # Partner that submitted it (JWT partner_id). NULL only for rows created before ownership existed.
+    partner_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     fingerprint: Mapped[str] = mapped_column(String(64))
     payload: Mapped[dict] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(16), default="QUEUED")

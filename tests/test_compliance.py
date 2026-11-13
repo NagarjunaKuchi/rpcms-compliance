@@ -28,7 +28,7 @@ def test_all_sources_verified_is_compliant(client):
 def test_amp_is_optional(client):
     body = check_body()
     del body["ampRecordId"]
-    r = client.post("/api/v1/partners/P1/compliance-checks", json=body, headers=idem())
+    r = client.post("/api/v1/partners/PRT-2026-0187/compliance-checks", json=body, headers=idem())
     assert set(by_source(r)) == {"URSB", "NGO_BUREAU"} and r.json()["overall"] == "COMPLIANT"
 
 
@@ -171,3 +171,54 @@ def test_requeue_needs_admin_role_and_only_works_on_failed(client, settings, sf,
     assert client.post(url, headers=auth(admin["roles"])).status_code == 409  # no longer FAILED
     with sf() as s:  # still down upstream: it retries with a fresh budget rather than failing at once
         assert process_due(s, settings, clients, now + timedelta(hours=5)) == {"retry": 1}
+
+
+ADMIN = ["compliance-admin"]
+
+
+def idem_for(n, **kw):
+    return {**auth(**kw), "Idempotency-Key": f"idem-key-{n:04d}"}
+
+
+def test_partner_can_only_check_itself_but_admin_can_check_any(client):
+    other = idem_for(1, partner="PRT-OTHER")
+    assert client.post("/api/v1/partners/PRT-2026-0187/compliance-checks", json=check_body(), headers=other).status_code == 403
+    assert run(client, 2).status_code == 200  # its own partner id
+    no_partner = idem_for(3, partner=None)
+    assert client.post("/api/v1/partners/PRT-2026-0187/compliance-checks", json=check_body(), headers=no_partner).status_code == 403
+    admin = idem_for(4, roles=ADMIN, partner=None)
+    assert client.post("/api/v1/partners/PRT-ANY/compliance-checks", json=check_body(), headers=admin).status_code == 200
+
+
+def test_submissions_belong_to_the_submitting_partner(client):
+    mine, other = idem_for(1), idem_for(2, partner="PRT-OTHER")
+    # a partner cannot file report lines for someone else
+    foreign = report(); foreign["lines"][0]["partnerId"] = "PRT-OTHER"
+    assert client.post("/api/v1/amp/expenditure-reports", json=foreign, headers=mine).status_code == 403
+    r = client.post("/api/v1/amp/expenditure-reports", json=report(), headers=mine)
+    n = client.post("/api/v1/nimes/indicator-submissions", json=indicators(), headers=idem_for(5))
+    assert r.status_code == n.status_code == 202
+    sid, nid = r.json()["submissionId"], n.json()["submissionId"]
+    # tokens without partner_id cannot submit; admins can
+    assert client.post("/api/v1/nimes/indicator-submissions", json=indicators("NIM-X"), headers=idem_for(6, partner=None)).status_code == 403
+    assert client.post("/api/v1/nimes/indicator-submissions", json=indicators("NIM-ADM"), headers=idem_for(7, roles=ADMIN, partner=None)).status_code == 202
+    # another partner sees them as missing, and cannot take over the same id (no leak of whose it is)
+    for i in (sid, nid):
+        assert client.get(f"/api/v1/submissions/{i}", headers=auth(partner="PRT-OTHER")).status_code == 404
+        assert client.get(f"/api/v1/submissions/{i}", headers=auth(partner=None)).status_code == 404
+        assert client.get(f"/api/v1/submissions/{i}", headers=auth()).status_code == 200
+        assert client.get(f"/api/v1/submissions/{i}", headers=auth(ADMIN, partner=None)).status_code == 200
+    shared = report("EXP-SHARED"); shared["lines"][0]["partnerId"] = None  # identical content, no line owner
+    assert client.post("/api/v1/amp/expenditure-reports", json=shared, headers=mine).status_code == 202
+    assert client.post("/api/v1/amp/expenditure-reports", json=shared, headers=other).status_code == 409  # same body, other partner
+    assert client.post("/api/v1/nimes/indicator-submissions", json=indicators(), headers=idem_for(8, partner="PRT-OTHER")).status_code == 409
+    assert client.post("/api/v1/amp/expenditure-reports", json=report(), headers=idem_for(9)).status_code == 200  # own replay still fine
+
+
+def test_legacy_submission_without_owner_is_admin_only(client, sf):
+    from rpcms_compliance.models import Submission
+    with sf() as s:
+        s.add(Submission(target="NIMES", client_ref="OLD", idempotency_key="idem-key-old1", fingerprint="x", payload={}, partner_id=None))
+        s.commit()
+    assert client.get("/api/v1/submissions/1", headers=auth()).status_code == 404
+    assert client.get("/api/v1/submissions/1", headers=auth(ADMIN, partner=None)).status_code == 200
