@@ -8,9 +8,10 @@ version = "0.1.0"
 description = "RPCMS partner compliance checks (URSB, NGO Bureau, AMP) and quarterly AMP/NIMES submissions, mock clients only"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["fastapi>=0.110", "pydantic>=2.5", "pydantic-settings>=2.2", "pyjwt>=2.8", "sqlalchemy>=2.0", "uvicorn>=0.27"]
+dependencies = ["fastapi>=0.110", "pydantic>=2.5", "pydantic-settings>=2.2", "pyjwt>=2.8", "sqlalchemy>=2.0", "uvicorn>=0.27", "alembic>=1.13"]
 
 [project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.1"]
 test = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]

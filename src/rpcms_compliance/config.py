@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_audience: str | None = None
     database_url: str = "sqlite:///./rpcms_compliance.db"
+    # True (default, dev/tests): create tables at startup. Set False in production and run `alembic upgrade head`.
+    create_tables: bool = True
     # Role (string in the JWT 'roles' claim) allowed to requeue FAILED submissions.
     admin_role: str = "compliance-admin"
 

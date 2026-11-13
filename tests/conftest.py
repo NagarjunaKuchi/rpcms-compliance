@@ -1,3 +1,4 @@
+import os
 import time
 
 import jwt
@@ -12,7 +13,7 @@ KEY = "test-signing-key-0123456789-abcdef"
 
 @pytest.fixture
 def settings():
-    return Settings(jwt_key=KEY, database_url="sqlite:///:memory:")
+    return Settings(jwt_key=KEY, database_url=os.environ.get("RPCMS_TEST_DATABASE_URL", "sqlite:///:memory:"), create_tables="RPCMS_TEST_DATABASE_URL" not in os.environ)
 
 
 @pytest.fixture
@@ -53,3 +54,15 @@ def report(rid="EXP-2026-Q3", ref="AMP-UG-2026-00731"):
 
 def indicators(ref="NIM-2026-Q3", code="IND-001"):
     return {"submissionRef": ref, "period": "2026-Q3", "indicators": [{"code": code, "value": 214, "unit": "people"}]}
+
+
+@pytest.fixture(autouse=True)
+def _clean_external_db():
+    """With RPCMS_TEST_DATABASE_URL set (a throwaway Postgres already migrated with `alembic upgrade head`),
+    empty the tables between tests. In-memory SQLite (default) needs nothing."""
+    url = os.environ.get("RPCMS_TEST_DATABASE_URL")
+    if url:
+        from sqlalchemy import create_engine, text
+        with create_engine(url).begin() as c:
+            c.execute(text("TRUNCATE compliance_check, submission RESTART IDENTITY CASCADE"))
+    yield

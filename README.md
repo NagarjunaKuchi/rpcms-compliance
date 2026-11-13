@@ -34,11 +34,20 @@ pytest
 ```
 Mock rules (see `upstream.py`): number/ID suffix `-DOWN` unavailable, `-NOTFOUND`, `-EXPIRED`, `-MISMATCH`; AMP `-CLOSED`; `-REJECT` makes a submission rejected.
 
+## Database migrations
+Schema changes are managed with Alembic (`migrations/`, initial revision `0001`). For anything beyond local development:
+```
+pip install -e ".[postgres]"
+export RPCMS_COMPLIANCE_DATABASE_URL=postgresql+psycopg://user:pass@host/db  RPCMS_COMPLIANCE_CREATE_TABLES=false
+alembic upgrade head
+```
+`RPCMS_COMPLIANCE_CREATE_TABLES` defaults to `true` (tables auto-created at startup, for development and tests); set it to `false` where Alembic owns the schema. A test checks that the migrations produce exactly the model schema. To run the suite against a migrated Postgres: `RPCMS_TEST_DATABASE_URL=... pytest` (it truncates the tables between tests, so use a throwaway database).
+
 ## Known limits (read before relying on this)
 - Mock-only (above). The `MISMATCH` status has no defined meaning until a real registry interface says what is compared.
 - Expenditure lines are **not** reconciled against AMP funding records before submission; "matched to AMP records" in the demo is not implemented.
 - Period is validated only as `YYYY-Qn`; NIMES indicator codes and units are not validated against any list.
 - Any valid officer token can run checks and submissions: no roles or partner scoping yet.
 - Compliance results are stored as returned, with no freshness policy (how recent a check must be to count).
-- Tables are created at startup with no migrations; use Alembic and PostgreSQL before production. Not load-tested; requeue is per submission only, submissions are not scoped by partner (any officer can read one), and the `roles` claim name/format is an assumption about the token issuer.
+- Migrations exist for the current schema only (one initial revision), verified on PostgreSQL 16 locally (upgrade, downgrade, full test suite) but not on other versions. Not load-tested; requeue is per submission only, submissions are not scoped by partner (any officer can read one), and the `roles` claim name/format is an assumption about the token issuer.
 - The 200 response for an identical resend and the 400 for a missing `Idempotency-Key` are additions to the drafted contract.
